@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include "ls2mod.h"
 
 #define nl() { puts(""); }
 
@@ -22,7 +23,9 @@ void execLs() {
     int f = fork();
 
     if(f == 0) { //자식 프로세스
-	execlp("ls", "ls", NULL);
+	//execlp("ls", "ls", NULL);
+	char* temp_av[] = { "ls", NULL };
+	my_ls(1, temp_av);
 	exit(0);
     } else {
 	wait(NULL);
