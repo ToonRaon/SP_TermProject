@@ -218,9 +218,11 @@ void dostat(char* filename) {
 void showAll() {
 	struct file_information* node = header->next;
 
+	int file_no = 0;
 	while(node != NULL) {
-		show_file_info(node->filename, node->info_p);		
-		node = node->next;
+	   printf("%d: ", file_no++); 
+	   show_file_info(node->filename, node->info_p);		
+	   node = node->next;
 	}
 	puts("");
 }
@@ -232,7 +234,7 @@ void do_ls(char dirname[]) {
 	init(); //init header as null
 
 	if((dir_ptr = opendir(dirname)) == NULL) {
-		fprintf(stderr, "ls1: cannot open %s\n", dirname);
+		fprintf(stderr, "ls2mod: cannot open %s\n", dirname);
 	} else {
 		chdir(dirname);
 		while((direntp = readdir(dir_ptr)) != NULL) {
