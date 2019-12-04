@@ -8,6 +8,23 @@
 
 #define nl() { puts(""); }
 
+#define BLACK 0;30
+#define RED 0;31
+#define GREEN 0;32
+#define ORANGE 0;33
+#define BLUE 0;34
+#define PURPLE 0;35
+#define CYAN 0;36
+#define LIGHT_GRAY 0;37
+#define DARK_GRAY 1;30
+#define LIGHT_RED 1;31
+#define LIGHT_GREEN 1;32
+#define YELLOW 1;33
+#define LIGHT_BLUE 1;34
+#define LIGHT_PURPLE 1;35
+#define LIGHT_CYAN 1;36
+#define WHITE 1;37
+
 void execPwd() {
     int f = fork();
     

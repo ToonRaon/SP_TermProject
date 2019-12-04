@@ -13,6 +13,25 @@
 
 #define DEBUG 0
 
+#define DEFAULT "\e[0m"
+#define BLACK "\e[0;30m"
+#define RED "\e[0;31m"
+#define GREEN "\e[0;32m"
+#define ORANGE "\e[0;33m"
+#define BLUE "\e[0;34m"
+#define PURPLE "\e[0;35m"
+#define CYAN "\e[0;36m"
+#define LIGHT_GRAY "\e[0;37m"
+#define DARK_GRAY "\e[1;30m"
+#define LIGHT_RED "\e[1;31m"
+#define LIGHT_GREEN "\e[1;32m"
+#define YELLOW "\e[1;33m"
+#define LIGHT_BLUE "\e[1;34m"
+#define LIGHT_PURPLE "\e[1;35m"
+#define LIGHT_CYAN "\e[1;36m"
+#define WHITE "\e[1;37m"
+
+
 int isReverse = FALSE;
 int isTime = FALSE;
 
@@ -29,6 +48,10 @@ void do_ls(char[]);
 void showAll();
 
 
+
+void setTextColor(char* color) {
+    printf("%s", color);
+}
 
 void printList() {
 	struct file_information* node = header->next;
@@ -131,11 +154,12 @@ char* uid_to_name(uid_t uid) {
 }
 
 void mode_to_letters(int mode, char str[]) {
-	strcpy(str, "------------");
+	strcpy(str, "----------");
 
 	if(S_ISDIR(mode)) str[0] = 'd';
 	if(S_ISCHR(mode)) str[0] = 'c';
 	if(S_ISBLK(mode)) str[0] = 'b';
+	if(S_ISLNK(mode)) str[0] = 'l'; //심볼릭 링크
 
 	if(mode & S_IRUSR) str[1] = 'r';
 	if(mode & S_IWUSR) str[2] = 'w';
@@ -146,16 +170,24 @@ void mode_to_letters(int mode, char str[]) {
 	if(mode & S_IXGRP) str[6] = 'x';
 
 	if(mode & S_IROTH) str[7] = 'r';
-	if(mode & S_IROTH) str[8] = 'w';
-	if(mode & S_IROTH) str[9] = 'x';
+	if(mode & S_IWOTH) str[8] = 'w';
+	if(mode & S_IXOTH) str[9] = 'x';
 }
 
 void show_file_info(char* filename, struct stat* info_p) {
 	char *uid_to_name(), *ctime(), *gid_to_name(), *filemode();
 	void mode_to_letters();
 	char modestr[11];
+	
+	if(info_p->st_mode & 0111) {
+	    setTextColor(GREEN);
+	}
+	if(S_ISDIR(info_p->st_mode)) {
+	    setTextColor(BLUE);
+	}
 
 	mode_to_letters(info_p->st_mode, modestr);
+//	printf("%o ", info_p->st_mode);
 	printf("%s", modestr);
 	printf("%4d ", (int) info_p->st_nlink);
 	printf("%-8s ", uid_to_name(info_p->st_uid));
@@ -166,6 +198,8 @@ void show_file_info(char* filename, struct stat* info_p) {
 	printf("%d ", (int)info_p->st_mtime);
 #endif
 	printf("%s \n", filename);
+
+	setTextColor(DEFAULT);
 
 }
 
