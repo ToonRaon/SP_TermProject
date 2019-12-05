@@ -185,6 +185,9 @@ void show_file_info(char* filename, struct stat* info_p) {
 	if(S_ISDIR(info_p->st_mode)) {
 	    setTextColor(BLUE);
 	}
+	if(S_ISLNK(info_p->st_mode)) {
+	    setTextColor(CYAN);
+	}
 
 	mode_to_letters(info_p->st_mode, modestr);
 //	printf("%o ", info_p->st_mode);
@@ -241,7 +244,7 @@ void addFilearr(char* filename, struct stat* info_p) {
 
 void dostat(char* filename) {
 	struct stat info;
-	if(stat(filename, &info) == -1)
+	if(lstat(filename, &info) == -1)
 		perror(filename);
 	else {
 		//show_file_info(filename, &info); //이거 큐 추가로 바꾸기
