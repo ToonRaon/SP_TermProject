@@ -7,6 +7,8 @@
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define FALSE 0
 #define TRUE 1
@@ -47,6 +49,12 @@ struct file_information* header;
 void do_ls(char[]);
 void showAll();
 
+struct hardlinkNode {
+	int inode;
+	char fname[512];
+};
+struct hardlinkNode* hardlinkList = NULL;
+int hardlinkListSize = 0;
 
 
 void setTextColor(char* color) {
@@ -164,6 +172,76 @@ void mode_to_letters(int mode, char str[]) {
 	if(mode & S_IXOTH) str[9] = 'x';
 }
 
+void getPwdAsString(char* str) {
+	int f = fork();
+//	int p[2];
+//	pipe(p);
+
+	if(f == 0) {
+//		dup2(p[1], 1);
+		close(1);
+		creat("pwdtmp", 0644);
+		execlp("pwd", "pwd", NULL);
+	} else {
+		wait(NULL);
+		
+		FILE* fp = fopen("pwdtmp", "r");
+		fscanf(fp, "%s", str);
+		fclose(fp);
+		remove("pwdtmp");
+	}
+}
+
+int getFileLineLength(char* fname) {
+	int n = 0;
+	int f = fork();
+
+	if(f == 0) {
+		close(1);
+		creat("tmppp", 0644);
+		execlp("wc", "wc", "-l", fname, NULL);
+	} else {
+		wait(NULL);
+
+		FILE* fp = fopen("tmppp", "r");
+		fscanf(fp, "%d ", &n);
+		fclose(fp);
+		remove("tmppp");
+
+		return n;
+	}
+}
+
+//inode, 파일명, 링크 수를 파라미터로 넣으면 같은 하드링크 파일들을 찾아준다
+void showHardLink(int inode, char* fname, int hardlinkCounter) {
+	char path[BUFSIZ]; //경로만
+	char pathfname[BUFSIZ]; //경로 + 파일명
+	getPwdAsString(path);
+	strcpy(pathfname, path);
+	strcat(pathfname, "/");
+	strcat(pathfname, fname);
+
+	if(hardlinkList == NULL) { //hardlinkList 처음엔 초기화 한 번 해주고
+		int n = getFileLineLength(".hardlink") - 1; //마지막 한 줄은 그냥 빈줄이라 - 1
+		hardlinkList = (struct hardlinkNode*)malloc(sizeof(struct hardlinkNode) * n);
+	
+		FILE* fp = fopen(".hardlink", "r");
+		for(int i = 0; i < n; i++) {
+			fscanf(fp, "%d %s\n", &hardlinkList[i].inode, hardlinkList[i].fname);
+		}
+
+		hardlinkListSize = n;
+	}
+
+	int foundLinkCounter = 1; //지금까지 찾은 하드 링크 개수 (본인 포함이므로 1로 시작)
+	for(int i = 0; i < hardlinkListSize && foundLinkCounter < hardlinkCounter; i++) {
+		if(hardlinkList[i].inode == inode && strcmp(hardlinkList[i].fname, pathfname) != 0) { //inode 같고 파일명 다르면 -> 하드링크 형제 찾은 거
+			foundLinkCounter++;
+			printf("<-> %s ", hardlinkList[i].fname);
+		}
+	}
+}
+
 void show_file_info(char* filename, struct stat* info_p) {
 	char *uid_to_name(), *ctime(), *gid_to_name(), *filemode();
 	void mode_to_letters();
@@ -183,12 +261,16 @@ void show_file_info(char* filename, struct stat* info_p) {
 
 	mode_to_letters(info_p->st_mode, modestr);
 	printf("%s", modestr);
-	printf("%4d ", (int) info_p->st_nlink);
+	printf("\t%d ", (int)info_p->st_ino);
+	printf("%4d ", (int)info_p->st_nlink);
 	printf("%-8s ", uid_to_name(info_p->st_uid));
 	printf("%-8s ", gid_to_name(info_p->st_gid));
 	printf("%-8ld ", (long)info_p->st_size);
 	printf("%.12s ", 4+ctime(&info_p->st_mtime));
 	printf("%s ", filename);
+	if(!S_ISDIR(info_p->st_mode) && (int)info_p->st_nlink > 1) { //하드링크
+		showHardLink((int)info_p->st_ino, filename, (int)info_p->st_nlink);
+	}
 
 	//심볼릭 링크인 경우에 파일명 옆에 -> 실제 파일명도 표시
 	char buf[BUFSIZ];
@@ -197,7 +279,7 @@ void show_file_info(char* filename, struct stat* info_p) {
 	printf("\n");
 
 	setTextColor(DEFAULT);
-
+	fflush(stdout);
 }
 
 void addFilearr(char* filename, struct stat* info_p) {
@@ -296,7 +378,6 @@ struct file_information* getFileInfoFromHeader(int k) {
 // ============================== ls2mod.c 끝 ============================== //
 // ============================== ls2mod.c 끝 ============================== //
 
-#include <sys/wait.h>
 #include <pthread.h>
 
 #define nl() { puts(""); }
@@ -387,6 +468,16 @@ int countChars(char* str, char c) {
 }
 
 void forkExec2(char** av) {
+	if(strcmp(av[0], "cd") == 0) { //cd는 명령어가 없어서 그냥 직접 chdir
+		if(strcmp(av[1], "~") == 0) {
+			chdir(getenv("HOME"));
+		} else {
+			chdir(av[1]);
+		}
+
+		return;
+	}
+
 	int f = fork();
 
 	if(f == 0) { //자식 프로세스
@@ -499,7 +590,6 @@ void custom_fgets(char* input) {
 					}
 					continue;
 				case 'C': //왼쪽
-
 					break;
 				case 'D': //오른쪽
 					break;
@@ -541,5 +631,5 @@ int main(int ac, char* av[]) {
 		showTerminal();
     }
 
-    return 0;
+	return 0;
 }
