@@ -297,8 +297,68 @@ struct file_information* getFileInfoFromHeader(int k) {
 // ============================== ls2mod.c 끝 ============================== //
 
 #include <sys/wait.h>
+#include <pthread.h>
 
 #define nl() { puts(""); }
+
+struct cmdNode {
+	char* cmd;
+	struct cmdNode* prev;
+	struct cmdNode* next;
+};
+
+struct cmdNode* cmdHeader; //사용자가 입력한 명령어 모음. cmdHeader 자체는 값이 없고 next에 값이 있음
+struct cmdNode* cmdCursor; //현재 선택 중인 cmdNode 위치
+
+
+void cmdHeaderInit() {
+	struct cmdNode* makeCmdNode(char*);
+
+	cmdHeader = makeCmdNode("");
+	cmdHeader->prev = NULL;
+	cmdHeader->next = NULL;
+
+	cmdCursor = cmdHeader;
+}
+
+struct cmdNode* makeCmdNode(char* str) {
+	struct cmdNode* temp = (struct cmdNode*)malloc(sizeof(struct cmdNode));
+	char* tempstr = (char*)malloc(sizeof(char) * strlen(str));
+	strcpy(tempstr, str);
+	temp->cmd = tempstr;
+	temp->prev = NULL;
+	temp->next = NULL;
+
+	return temp;
+}
+
+//originalNode 뒤에 nodeToInsert를 연결시킨다
+void insertCmdNode(struct cmdNode* originalNode, struct cmdNode* nodeToInsert) {
+
+	nodeToInsert->next = originalNode->next;
+	if(nodeToInsert->next != NULL) nodeToInsert->next->prev = nodeToInsert;
+
+	originalNode->next = nodeToInsert;
+	nodeToInsert->prev = originalNode;
+}
+
+void freeCmdNodes(struct cmdNode* nd) {
+	if(nd != NULL) {
+		freeCmdNodes(nd->next);
+
+		nd->prev->next = NULL; //앞 노드랑 연결 끊어놓고
+		free(nd); //free
+	}
+}
+
+//cmdHeader 마지막에 node를 새로 붙임
+void pushCmdNode(char* str) {
+	freeCmdNodes(cmdCursor->next);
+
+	struct cmdNode* temp = makeCmdNode(str);
+	insertCmdNode(cmdCursor, temp);
+	cmdCursor = temp;
+}
 
 
 //char*로된 문자열을 char**로 변환
@@ -386,6 +446,73 @@ void selectFile(int k) {
 	}
 }
 
+void eraseInput(int i) {
+	while(i > 0) {
+		printf("\b \b");
+		i--;
+	}
+}
+
+void custom_fgets(char* input) {
+	int i = 0;
+	char c;
+
+	while((c = getchar()) != '\n') {
+		if(c == 127) { //백스페이스
+			if(i > 0) {
+				printf("\b\b\b   \b\b\b"); //화면에서 문자 지우고
+				input[--i] = '\0'; //input에서 지우고
+			} else {
+				printf("\b\b  \b\b"); //더이상 못 지우는 경우
+			}
+		} else if(c == '\033') { //방향키
+			printf("\b\b\b\b    \b\b\b\b"); //^[[A 같은 거 지우기
+
+			getchar(); //[ 버리고
+
+			switch(getchar()) {
+				case 'A': //위
+					eraseInput(i);
+					i = 0;
+					strcpy(input, cmdCursor->cmd);
+					printf("%s", input);
+					i = strlen(input);
+					if(cmdCursor->prev != cmdHeader)
+						cmdCursor = cmdCursor->prev;
+					continue;
+				case 'B': //아래
+					eraseInput(i);
+					i = 0;
+					if(cmdCursor->next != NULL && cmdCursor->next->next != NULL) {
+//						if(cmdCursor->prev != cmdHeader) {
+//							cmdCursor = cmdCursor->next->next;
+//						} else {
+//							cmdCursor = cmdCursor->next;
+//						}
+						cmdCursor = cmdCursor->next->next;
+						strcpy(input, cmdCursor->cmd);
+						printf("%s", input);
+						i = strlen(input);
+						cmdCursor = cmdCursor->prev;
+					} else if(cmdCursor->next != NULL && cmdCursor->next->next == NULL) {
+						cmdCursor = cmdCursor->next;
+					}
+					continue;
+				case 'C': //왼쪽
+
+					break;
+				case 'D': //오른쪽
+					break;
+			}
+		} else { //그외 일반 입력
+			input[i++] = c;
+		}
+	}
+
+	input[i++] = '\0';
+
+	pushCmdNode(input);
+}
 
 void showTerminal() {
     char input[BUFSIZ];
@@ -393,7 +520,10 @@ void showTerminal() {
 	showWindow();
 
 	printf("linux explorer: ");
-	fgets(input, BUFSIZ, stdin);
+
+	custom_fgets(input);
+//	fgets(input, BUFSIZ, stdin);
+//	pushCmdNode(input);
 
 	//input이 1이상의 숫자이면 파일을 선택한 것으로 간주
 	int fileNum;
@@ -404,8 +534,9 @@ void showTerminal() {
 	}
 }
 
-
 int main(int ac, char* av[]) {
+	cmdHeaderInit();
+
     while(1) {
 		showTerminal();
     }
