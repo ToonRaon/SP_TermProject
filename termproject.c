@@ -44,7 +44,7 @@ struct file_information {
 	struct stat* info_p;
 	struct file_information* next;
 };
-struct file_information* header;
+struct file_information* header = NULL;
 
 void do_ls(char[]);
 void showAll();
@@ -107,8 +107,19 @@ int paramsCheck(int n, char* str[]) {
 	return count;
 }
 
+void freeNode(struct file_information* n) {
+	if(n != NULL) {
+		freeNode(n->next);
+		free(n);
+	}
+}
+
 void init() {
 	//init header
+	if(header != NULL) {
+		freeNode(header);
+	}
+	
 	header = makeNode(NULL, NULL, NULL);
 }
 
@@ -119,14 +130,14 @@ void my_ls(int ac, char* av[]) {
         do_ls(".");
     } else {
         while(--ac) {
-    	++av;
-    	if(*av[0] == '-') { //ignore that start with dash(-)
-    	    continue;
-    	}
+			++av;
+			if(*av[0] == '-') { //ignore that start with dash(-)
+				continue;
+			}
 
-	    printf("%s:\n", *av);
-	    do_ls(*av);
-	}
+			printf("%s:\n", *av);
+			do_ls(*av);
+		}
     }
 }
 
@@ -221,11 +232,16 @@ void showHardLink(int inode, char* fname, int hardlinkCounter) {
 	strcat(pathfname, "/");
 	strcat(pathfname, fname);
 
+	char hardlinkFile[BUFSIZ];
+	strcpy(hardlinkFile, getenv("HOME"));
+	strcat(hardlinkFile, "/");
+	strcat(hardlinkFile, ".hardlink");
+
 	if(hardlinkList == NULL) { //hardlinkList 처음엔 초기화 한 번 해주고
-		int n = getFileLineLength(".hardlink") - 1; //마지막 한 줄은 그냥 빈줄이라 - 1
+		int n = getFileLineLength(hardlinkFile); //마지막 한 줄은 그냥 빈줄이라 - 1
 		hardlinkList = (struct hardlinkNode*)malloc(sizeof(struct hardlinkNode) * n);
 	
-		FILE* fp = fopen(".hardlink", "r");
+		FILE* fp = fopen(hardlinkFile, "r");
 		for(int i = 0; i < n; i++) {
 			fscanf(fp, "%d %s\n", &hardlinkList[i].inode, hardlinkList[i].fname);
 		}
@@ -240,6 +256,89 @@ void showHardLink(int inode, char* fname, int hardlinkCounter) {
 			printf("<-> %s ", hardlinkList[i].fname);
 		}
 	}
+}
+
+
+//.hardlink 파일에 기존에 저장된 inode, filename을 가진 게 없으면 새로 추가한다
+void addHardlinkToFile(int inode, char* filename) {
+	char hardlinkFile[strlen(getenv("HOME")) + strlen("/.hardlink") + 1];
+	strcpy(hardlinkFile, getenv("HOME"));
+	strcat(hardlinkFile, "/.hardlink");
+
+	FILE* fp = fopen(hardlinkFile, "a+"); //읽기 및 append 모드
+	
+	int n = getFileLineLength(hardlinkFile);
+	for(int i = 0; i < n; i++) {
+		char buf[255];
+		fgets(buf, 255, fp);
+		int a;
+		char b[255];
+		sscanf(buf, "%d %s", &a, b);
+//		printf("buf: %d %s\n", a, b);
+
+		if(a == inode && strcmp(b, filename) == 0) { //이미 같은 inode와 파일명을 가진게 있으면 스킵
+			return;
+		}
+	}
+
+	fprintf(fp, "%d %s\n", inode, filename);
+	fclose(fp);
+}
+
+//dostat과 비슷. 현재 파일(폴더일수도 있음)을 검사하여 폴더이면 checkDir, 파일이면 하드링크인지 확인
+void checkFile(char* filename) {
+//	printf("checkFile: %s 조사 중...\n", filename);
+//	sleep(1);
+
+	void checkDir(char*);
+
+	struct stat info;
+
+	if(lstat(filename, &info) == -1)
+		perror(filename);
+	else {
+		if(S_ISDIR(info.st_mode)) { //폴더면 checkDir
+			checkDir(filename);
+		} else { //파일이면 하드링크인지 검사
+			if((int)info.st_nlink > 1) { //하드링크
+				addHardlinkToFile(info.st_ino, filename); //.hardlink 파일에 정보 추가
+			}
+		}
+	}
+}
+
+
+//do_ls와 비슷. dirname 폴더를 뒤져서 파일이면 하드링크인지 검사하고, 폴더면 재귀적으로 다시 checkDir한다
+void checkDir(char* dirname) {
+//	printf("checkDir: %s 조사 중...\n", dirname);
+//	sleep(1);
+
+	DIR* dir_ptr;
+	struct dirent* direntp;
+
+	if((dir_ptr = opendir(dirname)) == NULL) {
+		fprintf(stderr, "ls2mod: cannot open %s\n", dirname);
+	} else {
+		while((direntp = readdir(dir_ptr)) != NULL) {
+			char* fname = direntp->d_name;
+			if(strcmp(fname, ".") == 0 || strcmp(fname, "..") == 0) { //무한 루프 안 돌게
+				continue;
+			}
+
+			char path[strlen(dirname) + strlen("/") + strlen(fname) + 1]; //경로 + 파일명
+			strcpy(path, dirname);
+			strcat(path, "/");
+			strcat(path, fname);
+			checkFile(path);
+		}
+		closedir(dir_ptr);
+	}
+}
+
+
+//.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
+void updateHardlinkFile() {
+	checkDir(getenv("HOME"));
 }
 
 void show_file_info(char* filename, struct stat* info_p) {
@@ -349,13 +448,11 @@ void do_ls(char dirname[]) {
 	if((dir_ptr = opendir(dirname)) == NULL) {
 		fprintf(stderr, "ls2mod: cannot open %s\n", dirname);
 	} else {
-//		chdir(dirname);
 		while((direntp = readdir(dir_ptr)) != NULL) {
 			dostat(direntp->d_name);
 		}
 		showAll();
 		closedir(dir_ptr);
-//		chdir("..");
 	}
 }
 
@@ -506,7 +603,7 @@ void execPwd() {
 }
 
 void execLs() {
-	char* temp_av[] = { "ls", NULL };
+	char* temp_av[] = { "ls" };
 	my_ls(1, temp_av);
 }
 
@@ -605,7 +702,7 @@ void custom_fgets(char* input) {
 }
 
 void showTerminal() {
-    char input[BUFSIZ];
+    char input[200];
 
 	showWindow();
 
@@ -625,6 +722,7 @@ void showTerminal() {
 }
 
 int main(int ac, char* av[]) {
+	updateHardlinkFile();
 	cmdHeaderInit();
 
     while(1) {
