@@ -715,7 +715,7 @@ void custom_fgets(char* input) {
 			} else {
 				printf("\b\b  \b\b"); //더이상 못 지우는 경우
 			}
-		} else if(c == 27) { //방향키
+		} else if(c == '\033') { //방향키
 			printf("\b\b\b\b    \b\b\b\b"); //^[[A 같은 거 지우기
 
 			getchar(); //[ 버리고
