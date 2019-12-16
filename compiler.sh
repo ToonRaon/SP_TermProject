@@ -1,4 +1,4 @@
 #!/bin/bash
 
-gcc termproject.c -o termproject -lpthread
+gcc termproject.c -lpthread -o termproject
 ./termproject

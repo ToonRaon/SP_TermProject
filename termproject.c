@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #define FALSE 0
 #define TRUE 1
@@ -55,6 +56,10 @@ struct hardlinkNode {
 };
 struct hardlinkNode* hardlinkList = NULL;
 int hardlinkListSize = 0;
+
+//pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+int mutex = 0; //0: unlocked, 1: locked
+
 
 
 void setTextColor(char* color) {
@@ -225,6 +230,8 @@ int getFileLineLength(char* fname) {
 
 //inode, 파일명, 링크 수를 파라미터로 넣으면 같은 하드링크 파일들을 찾아준다
 void showHardLink(int inode, char* fname, int hardlinkCounter) {
+	if(mutex == 1) return; //쓰레드에서 파일 갱신 중이면 그냥 일단 무시
+
 	char path[BUFSIZ]; //경로만
 	char pathfname[BUFSIZ]; //경로 + 파일명
 	getPwdAsString(path);
@@ -238,15 +245,21 @@ void showHardLink(int inode, char* fname, int hardlinkCounter) {
 	strcat(hardlinkFile, ".hardlink");
 
 	if(hardlinkList == NULL) { //hardlinkList 처음엔 초기화 한 번 해주고
+//		pthread_mutex_lock(&mutex);
+		
 		int n = getFileLineLength(hardlinkFile); //마지막 한 줄은 그냥 빈줄이라 - 1
 		hardlinkList = (struct hardlinkNode*)malloc(sizeof(struct hardlinkNode) * n);
-	
+
 		FILE* fp = fopen(hardlinkFile, "r");
 		for(int i = 0; i < n; i++) {
 			fscanf(fp, "%d %s\n", &hardlinkList[i].inode, hardlinkList[i].fname);
 		}
 
 		hardlinkListSize = n;
+
+		fclose(fp);
+
+//		pthread_mutex_unlock(&mutex);
 	}
 
 	int foundLinkCounter = 1; //지금까지 찾은 하드 링크 개수 (본인 포함이므로 1로 시작)
@@ -264,6 +277,9 @@ void addHardlinkToFile(int inode, char* filename) {
 	char hardlinkFile[strlen(getenv("HOME")) + strlen("/.hardlink") + 1];
 	strcpy(hardlinkFile, getenv("HOME"));
 	strcat(hardlinkFile, "/.hardlink");
+
+//	pthread_mutex_lock(&mutex);
+	mutex = 1;
 
 	FILE* fp = fopen(hardlinkFile, "a+"); //읽기 및 append 모드
 	
@@ -283,6 +299,9 @@ void addHardlinkToFile(int inode, char* filename) {
 
 	fprintf(fp, "%d %s\n", inode, filename);
 	fclose(fp);
+
+//	pthread_mutex_unlock(&mutex);
+	mutex = 0;
 }
 
 //dostat과 비슷. 현재 파일(폴더일수도 있음)을 검사하여 폴더이면 checkDir, 파일이면 하드링크인지 확인
@@ -337,7 +356,7 @@ void checkDir(char* dirname) {
 
 
 //.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
-void updateHardlinkFile() {
+void* updateHardlinkFile() {
 	checkDir(getenv("HOME"));
 }
 
@@ -475,7 +494,6 @@ struct file_information* getFileInfoFromHeader(int k) {
 // ============================== ls2mod.c 끝 ============================== //
 // ============================== ls2mod.c 끝 ============================== //
 
-#include <pthread.h>
 
 #define nl() { puts(""); }
 
@@ -488,6 +506,8 @@ struct cmdNode {
 struct cmdNode* cmdHeader; //사용자가 입력한 명령어 모음. cmdHeader 자체는 값이 없고 next에 값이 있음
 struct cmdNode* cmdCursor; //현재 선택 중인 cmdNode 위치
 
+struct cmdNode* dirHeader; //지나온 디렉토리 저장
+struct cmdNode* dirCursor;
 
 void cmdHeaderInit() {
 	struct cmdNode* makeCmdNode(char*);
@@ -497,6 +517,33 @@ void cmdHeaderInit() {
 	cmdHeader->next = NULL;
 
 	cmdCursor = cmdHeader;
+}
+
+void dirHeaderInit() {
+	struct cmdNode* makeCmdNode(char*);
+
+	struct cmdNode* temp = makeCmdNode(".");
+	temp->next = NULL;
+
+	dirHeader = makeCmdNode("");
+	dirHeader->next = temp;
+	dirHeader->prev = NULL;
+
+	temp->prev = dirHeader;
+
+	dirCursor = temp;
+}
+
+void printCmdHeader(struct cmdNode* header) {
+	if(header == NULL || header->next == NULL) {
+		return;
+	}
+
+	printf("cmdNodes: ");
+	for(struct cmdNode* curNode = header->next; curNode != NULL; curNode = curNode->next) {
+		printf("%s ", curNode->cmd);
+	}
+	nl();
 }
 
 struct cmdNode* makeCmdNode(char* str) {
@@ -525,17 +572,29 @@ void freeCmdNodes(struct cmdNode* nd) {
 		freeCmdNodes(nd->next);
 
 		nd->prev->next = NULL; //앞 노드랑 연결 끊어놓고
+		free(nd->cmd);
 		free(nd); //free
 	}
 }
 
-//cmdHeader 마지막에 node를 새로 붙임
+//cmdCursor 위치에 node를 새로 붙임
 void pushCmdNode(char* str) {
 	freeCmdNodes(cmdCursor->next);
 
 	struct cmdNode* temp = makeCmdNode(str);
 	insertCmdNode(cmdCursor, temp);
 	cmdCursor = temp;
+}
+
+//dirCursor 뒤에 node를 새로 붙임
+void pushDirNode(char* str) {
+	if(dirCursor->next != NULL) freeCmdNodes(dirCursor->next);
+
+	struct cmdNode* temp = makeCmdNode(str);
+	dirCursor->next = temp;
+	temp->prev = dirCursor;
+	dirCursor = temp;
+	temp->next = NULL;
 }
 
 
@@ -568,8 +627,10 @@ void forkExec2(char** av) {
 	if(strcmp(av[0], "cd") == 0) { //cd는 명령어가 없어서 그냥 직접 chdir
 		if(strcmp(av[1], "~") == 0) {
 			chdir(getenv("HOME"));
+//			pushDirNode(getenv("HOME"));
 		} else {
 			chdir(av[1]);
+//			pushDirNode(av[1]);
 		}
 
 		return;
@@ -623,6 +684,7 @@ void selectFile(int k) {
 
 	if(S_ISDIR(mode)) { //폴더면 폴더 이동
 		chdir(fname);
+//		pushDirNode(fname);
 	} else if(mode & (S_IXUSR | S_IXGRP | S_IXOTH)) { //실행 가능한 파일
 		char buf[2 + sizeof(fname)] = { "./" };
 		strcat(buf, fname);
@@ -653,7 +715,7 @@ void custom_fgets(char* input) {
 			} else {
 				printf("\b\b  \b\b"); //더이상 못 지우는 경우
 			}
-		} else if(c == '\033') { //방향키
+		} else if(c == 27) { //방향키
 			printf("\b\b\b\b    \b\b\b\b"); //^[[A 같은 거 지우기
 
 			getchar(); //[ 버리고
@@ -687,9 +749,9 @@ void custom_fgets(char* input) {
 					}
 					continue;
 				case 'C': //왼쪽
-					break;
+					continue;
 				case 'D': //오른쪽
-					break;
+					continue;
 			}
 		} else { //그외 일반 입력
 			input[i++] = c;
@@ -705,6 +767,8 @@ void showTerminal() {
     char input[200];
 
 	showWindow();
+
+//	printCmdHeader(dirHeader);
 
 	printf("linux explorer: ");
 
@@ -722,8 +786,12 @@ void showTerminal() {
 }
 
 int main(int ac, char* av[]) {
+//	pthread_t update_th;
+//	pthread_create(&update_th, NULL, updateHardlinkFile, NULL);
 	updateHardlinkFile();
+
 	cmdHeaderInit();
+//	dirHeaderInit();
 
     while(1) {
 		showTerminal();
