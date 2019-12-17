@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <termios.h>
 
 #define FALSE 0
 #define TRUE 1
@@ -58,7 +59,7 @@ struct hardlinkNode* hardlinkList = NULL;
 int hardlinkListSize = 0;
 
 //pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-int mutex = 0; //0: unlocked, 1: locked
+static int mutex = 0; //0: unlocked, 1: locked
 
 
 
@@ -230,7 +231,7 @@ int getFileLineLength(char* fname) {
 
 //inode, 파일명, 링크 수를 파라미터로 넣으면 같은 하드링크 파일들을 찾아준다
 void showHardLink(int inode, char* fname, int hardlinkCounter) {
-	if(mutex == 1) return; //쓰레드에서 파일 갱신 중이면 그냥 일단 무시
+	if(mutex == 1) { printf("<-> 검색중... "); return; } //쓰레드에서 파일 갱신 중이면 그냥 일단 무시
 
 	char path[BUFSIZ]; //경로만
 	char pathfname[BUFSIZ]; //경로 + 파일명
@@ -278,9 +279,6 @@ void addHardlinkToFile(int inode, char* filename) {
 	strcpy(hardlinkFile, getenv("HOME"));
 	strcat(hardlinkFile, "/.hardlink");
 
-//	pthread_mutex_lock(&mutex);
-	mutex = 1;
-
 	FILE* fp = fopen(hardlinkFile, "a+"); //읽기 및 append 모드
 	
 	int n = getFileLineLength(hardlinkFile);
@@ -293,15 +291,16 @@ void addHardlinkToFile(int inode, char* filename) {
 //		printf("buf: %d %s\n", a, b);
 
 		if(a == inode && strcmp(b, filename) == 0) { //이미 같은 inode와 파일명을 가진게 있으면 스킵
+//			printf("%d %s와 %d %s는 같습니다.\n", a, b, inode, filename);
+			fclose(fp);
 			return;
+		} else {
+//			printf("%d %s와 %d %s는 다릅니다.\n", a, b, inode, filename);
 		}
 	}
 
 	fprintf(fp, "%d %s\n", inode, filename);
 	fclose(fp);
-
-//	pthread_mutex_unlock(&mutex);
-	mutex = 0;
 }
 
 //dostat과 비슷. 현재 파일(폴더일수도 있음)을 검사하여 폴더이면 checkDir, 파일이면 하드링크인지 확인
@@ -357,7 +356,14 @@ void checkDir(char* dirname) {
 
 //.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
 void* updateHardlinkFile() {
-	checkDir(getenv("HOME"));
+	while(1) {
+//		pthread_mutex_lock(&mutex);
+		mutex = 1;
+		checkDir(getenv("HOME"));
+		mutex = 0;
+//		pthread_mutex_unlock(&mutex);
+		sleep(10);
+	}
 }
 
 void show_file_info(char* filename, struct stat* info_p) {
@@ -703,10 +709,37 @@ void eraseInput(int i) {
 	}
 }
 
+//how가 0이면 저장, 1이면 복원
+void ttyMode(int how) {
+	static struct termios original_mode;
+
+	if(how == 0) {
+		tcgetattr(0, &original_mode);
+	} else {
+		tcsetattr(0, TCSANOW, &original_mode);
+	}
+}
+
+//how가 0이면 noncanon, 1이면 canon
+void icanonTtyMode(int how) {
+	if(how == 0) {
+		ttyMode(0);
+
+		struct termios ttystate;
+
+		tcgetattr(0, &ttystate);
+		ttystate.c_lflag &= ~ICANON;
+		tcsetattr(0, TCSANOW, &ttystate);
+	} else {
+		ttyMode(1);
+	}
+}
+
 void custom_fgets(char* input) {
 	int i = 0;
 	char c;
 
+	icanonTtyMode(0);
 	while((c = getchar()) != '\n') {
 		if(c == 127) { //백스페이스
 			if(i > 0) {
@@ -761,6 +794,8 @@ void custom_fgets(char* input) {
 	input[i++] = '\0';
 
 	pushCmdNode(input);
+
+	icanonTtyMode(1);
 }
 
 void showTerminal() {
@@ -788,7 +823,7 @@ void showTerminal() {
 int main(int ac, char* av[]) {
 	pthread_t update_th;
 	pthread_create(&update_th, NULL, updateHardlinkFile, NULL);
-//	updateHardlinkFile();
+//	pthread_join(update_th, NULL);
 
 	cmdHeaderInit();
 //	dirHeaderInit();
