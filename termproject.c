@@ -786,9 +786,9 @@ void showTerminal() {
 }
 
 int main(int ac, char* av[]) {
-//	pthread_t update_th;
-//	pthread_create(&update_th, NULL, updateHardlinkFile, NULL);
-	updateHardlinkFile();
+	pthread_t update_th;
+	pthread_create(&update_th, NULL, updateHardlinkFile, NULL);
+//	updateHardlinkFile();
 
 	cmdHeaderInit();
 //	dirHeaderInit();
