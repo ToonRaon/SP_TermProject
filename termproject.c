@@ -229,6 +229,34 @@ int getFileLineLength(char* fname) {
 	}
 }
 
+void hardlinkListInit() {
+	if(hardlinkList != NULL) {
+		//free(hardlinkList);
+		hardlinkList = NULL;
+	}
+
+//	pthread_mutex_lock(&mutex);
+
+	char hardlinkFile[BUFSIZ];
+	strcpy(hardlinkFile, getenv("HOME"));
+	strcat(hardlinkFile, "/");
+	strcat(hardlinkFile, ".hardlink");
+
+	int n = getFileLineLength(hardlinkFile); //마지막 한 줄은 그냥 빈줄이라 - 1
+	hardlinkList = (struct hardlinkNode*)malloc(sizeof(struct hardlinkNode) * n);
+
+	FILE* fp = fopen(hardlinkFile, "r");
+	for(int i = 0; i < n; i++) {
+		fscanf(fp, "%d %s\n", &hardlinkList[i].inode, hardlinkList[i].fname);
+	}
+
+	hardlinkListSize = n;
+
+	fclose(fp);
+
+//	pthread_mutex_unlock(&mutex);
+}
+
 //inode, 파일명, 링크 수를 파라미터로 넣으면 같은 하드링크 파일들을 찾아준다
 void showHardLink(int inode, char* fname, int hardlinkCounter) {
 	if(mutex == 1) { printf("<-> 검색중... "); return; } //쓰레드에서 파일 갱신 중이면 그냥 일단 무시
@@ -239,29 +267,6 @@ void showHardLink(int inode, char* fname, int hardlinkCounter) {
 	strcpy(pathfname, path);
 	strcat(pathfname, "/");
 	strcat(pathfname, fname);
-
-	char hardlinkFile[BUFSIZ];
-	strcpy(hardlinkFile, getenv("HOME"));
-	strcat(hardlinkFile, "/");
-	strcat(hardlinkFile, ".hardlink");
-
-	if(hardlinkList == NULL) { //hardlinkList 처음엔 초기화 한 번 해주고
-//		pthread_mutex_lock(&mutex);
-		
-		int n = getFileLineLength(hardlinkFile); //마지막 한 줄은 그냥 빈줄이라 - 1
-		hardlinkList = (struct hardlinkNode*)malloc(sizeof(struct hardlinkNode) * n);
-
-		FILE* fp = fopen(hardlinkFile, "r");
-		for(int i = 0; i < n; i++) {
-			fscanf(fp, "%d %s\n", &hardlinkList[i].inode, hardlinkList[i].fname);
-		}
-
-		hardlinkListSize = n;
-
-		fclose(fp);
-
-//		pthread_mutex_unlock(&mutex);
-	}
 
 	int foundLinkCounter = 1; //지금까지 찾은 하드 링크 개수 (본인 포함이므로 1로 시작)
 	for(int i = 0; i < hardlinkListSize && foundLinkCounter < hardlinkCounter; i++) {
@@ -353,21 +358,28 @@ void checkDir(char* dirname) {
 	}
 }
 
-
-//.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
-void* updateHardlinkFile() {
+//.hardlink 파일을 다 지우고 깨끗하게 (삭제된 하드 링크 계속 남아있는 버그 해결용)
+void hardlinkFileInit() {
 	char hardlinkFile[strlen(getenv("HOME")) + strlen("/.hardlink") + 1];
 	strcpy(hardlinkFile, getenv("HOME"));
 	strcat(hardlinkFile, "/.hardlink");
-	remove(hardlinkFile); //이거 안 하면 삭제된 하드링크가 계속 파일에 남아있음
+	creat(hardlinkFile, 0644);
+}
 
+//.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
+void updateHardlinkFile() {
+//	pthread_mutex_lock(&mutex);
+	mutex = 1;
+	hardlinkFileInit();
+	checkDir(getenv("HOME"));
+	mutex = 0;
+//	pthread_mutex_unlock(&mutex);
+}
+
+void* updateHardlinkFileThreadFunc() {
 	while(1) {
-//		pthread_mutex_lock(&mutex);
-		mutex = 1;
-		checkDir(getenv("HOME"));
-		mutex = 0;
-//		pthread_mutex_unlock(&mutex);
 		sleep(10);
+		updateHardlinkFile();
 	}
 }
 
@@ -452,7 +464,6 @@ void dostat(char* filename) {
 	if(lstat(filename, &info) == -1)
 		perror(filename);
 	else {
-		//show_file_info(filename, &info); //이거 큐 추가로 바꾸기
 		addFilearr(filename, &info);
 	}
 }
@@ -803,6 +814,8 @@ void custom_fgets(char* input) {
 void showTerminal() {
     char input[200] = { 0, };
 
+	hardlinkListInit();
+
 	showWindow();
 
 //	printCmdHeader(dirHeader);
@@ -825,9 +838,12 @@ void showTerminal() {
 }
 
 int main(int ac, char* av[]) {
+//	hardlinkFileInit();
+
+	updateHardlinkFile();
+
 	pthread_t update_th;
-	pthread_create(&update_th, NULL, updateHardlinkFile, NULL);
-//	pthread_join(update_th, NULL);
+	pthread_create(&update_th, NULL, updateHardlinkFileThreadFunc, NULL);
 
 	cmdHeaderInit();
 //	dirHeaderInit();

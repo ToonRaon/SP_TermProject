@@ -12,7 +12,6 @@
 #define DEF "\e[0m"
 
 int main() {
-	char str[20] = "this is a str";
-	printf("%d\n", strcmp(str, "aaaaaaa"));
+	creat("asda.txt", 0644);
 	return 0;
 }
