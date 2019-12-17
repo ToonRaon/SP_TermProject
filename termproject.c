@@ -702,10 +702,10 @@ void selectFile(int k) {
 	}
 }
 
-void eraseInput(int i) {
-	while(i > 0) {
+void eraseInput(char* input) {
+	for(int i = strlen(input) - 1; i >= 0; i--) {
 		printf("\b \b");
-		i--;
+		input[i] = '\0';
 	}
 }
 
@@ -755,23 +755,20 @@ void custom_fgets(char* input) {
 
 			switch(getchar()) {
 				case 'A': //위
-					eraseInput(i);
+					if(cmdCursor == cmdHeader) {
+						continue;
+					}
+					eraseInput(input);
 					i = 0;
 					strcpy(input, cmdCursor->cmd);
 					printf("%s", input);
 					i = strlen(input);
-					if(cmdCursor->prev != cmdHeader)
-						cmdCursor = cmdCursor->prev;
+					cmdCursor = cmdCursor->prev;
 					continue;
 				case 'B': //아래
-					eraseInput(i);
+					eraseInput(input);
 					i = 0;
 					if(cmdCursor->next != NULL && cmdCursor->next->next != NULL) {
-//						if(cmdCursor->prev != cmdHeader) {
-//							cmdCursor = cmdCursor->next->next;
-//						} else {
-//							cmdCursor = cmdCursor->next;
-//						}
 						cmdCursor = cmdCursor->next->next;
 						strcpy(input, cmdCursor->cmd);
 						printf("%s", input);
@@ -799,7 +796,7 @@ void custom_fgets(char* input) {
 }
 
 void showTerminal() {
-    char input[200];
+    char input[200] = { 0, };
 
 	showWindow();
 
