@@ -356,6 +356,11 @@ void checkDir(char* dirname) {
 
 //.hardlink 파일을 업데이트해주는 함수 (쓰레드에 의해 돌아감)
 void* updateHardlinkFile() {
+	char hardlinkFile[strlen(getenv("HOME")) + strlen("/.hardlink") + 1];
+	strcpy(hardlinkFile, getenv("HOME"));
+	strcat(hardlinkFile, "/.hardlink");
+	remove(hardlinkFile); //이거 안 하면 삭제된 하드링크가 계속 파일에 남아있음
+
 	while(1) {
 //		pthread_mutex_lock(&mutex);
 		mutex = 1;
@@ -813,7 +818,9 @@ void showTerminal() {
 	if((fileNum = atoi(input)) > 0) {
 		selectFile(fileNum);
 	} else { //명령어를 입력한 경우에는 명령어를 실행
-		forkExec(input);
+		if(strlen(input) > 0) { //바로 엔터쳐서 버그나는 거 방지
+			forkExec(input);
+		}
 	}
 }
 
